@@ -1,40 +1,57 @@
-# Finite Automata Pattern Matcher
+Finite Automata Pattern Matcher
+A simple DFA constructor and visualizer built with Python and PySide6.
+The application takes a pattern, constructs its Deterministic Finite Automaton (DFA), and displays:
+- DFA state diagram
+- Transition table
+- Accepting state
+- OTHER transitions
+The entered text is displayed in the interface but is not processed.
+Features
+- DFA construction from a pattern
+- Visual DFA graph
+- Transition table
+- Zoom and fit controls
+- Dark-themed GUI
+- Cross-platform
+Requirements
+- Python 3.10+
+- PySide6
+Installation
+Windows
+git clone https://github.com/AaryaG-17/Finite-Automata-Pattern-Matcher.git
+cd Finite-Automata-Pattern-Matcher
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+python main.py
 
-An interactive desktop application for building and visualizing a deterministic finite automaton (DFA) from a pattern.
+Linux / macOS
+git clone https://github.com/AaryaG-17/Finite-Automata-Pattern-Matcher.git
+cd Finite-Automata-Pattern-Matcher
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python main.py
 
-The application also accepts text input for pattern-processing workflows while keeping the DFA construction and visualization separate from the user interface.
+Tests
+python -m unittest discover -s tests
 
-The project is designed to be **cross-platform and device-independent**. It does not require Graphviz, a database, a compiler, a GPU, or any OS-specific library.
-
-## Features
-
-- Enter text to be processed.
-- Enter a pattern.
-- Build a deterministic finite automaton directly from the pattern.
-- Display the DFA as an interactive visual state machine.
-- Show the start state and accepting state.
-- Show DFA transitions graphically.
-- Show the complete transition table.
-- Display an `OTHER` transition for characters outside the pattern alphabet.
-- Zoom and pan the DFA visualization.
-- Fit the complete DFA inside the visualization area.
-- Built-in automated tests for DFA construction and pattern matching logic.
-
-## Project structure
-
-```text
+Project Structure
 Finite-Automata-Pattern-Matcher/
 ├── main.py
 ├── requirements.txt
-├── README.md
-├── LICENSE
 ├── src/
-│   ├── __init__.py
 │   ├── dfa.py
 │   ├── graph_view.py
-│   ├── main_window.py
-│   └── matcher.py
+│   └── main_window.py
 └── tests/
-    ├── __init__.py
-    ├── test_dfa.py
-    └── test_matcher.py
+    └── test_dfa.py
+
+How It Works
+Pattern
+   ↓
+DFA Construction
+   ↓
+DFA Graph + Transition Table
+
+Built for learning and visualizing Deterministic Finite Automata.
