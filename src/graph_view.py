@@ -2,234 +2,265 @@ from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import (
     QBrush,
     QColor,
     QFont,
-    QPainter,
     QPainterPath,
     QPen,
     QPolygonF,
 )
 from PySide6.QtWidgets import (
-    QGraphicsEllipseItem,
     QGraphicsPathItem,
     QGraphicsPolygonItem,
     QGraphicsScene,
     QGraphicsSimpleTextItem,
     QGraphicsView,
-    QWidget,
 )
 
 from .dfa import DFA, OTHER_SYMBOL
 
 
 class DFAGraphView(QGraphicsView):
-    """Custom QGraphicsView that renders a DFA as a readable state machine."""
+    """Interactive visualization of a DFA."""
 
-    NODE_RADIUS = 32.0
-    HORIZONTAL_GAP = 150.0
-    ARC_HEIGHT = 95.0
-    TOP_PADDING = 130.0
-    BOTTOM_PADDING = 130.0
-    SIDE_PADDING = 90.0
+    NODE_RADIUS = 28.0
+    HORIZONTAL_GAP = 125.0
+    ARC_HEIGHT = 55.0
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
 
-        self.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        self.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+        self.setScene(QGraphicsScene(self))
 
-        # Click-and-drag panning.
-        self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+        self.setRenderHint(
+            self.renderHints()
+        )
 
-        # Keep the point under the mouse cursor fixed while zooming.
+        self.setRenderHint(
+            self.renderHints()
+        )
+
+        self.setBackgroundBrush(
+            QColor("#10161c")
+        )
+
+        self.setFrameShape(
+            QGraphicsView.Shape.NoFrame
+        )
+
+        self.setDragMode(
+            QGraphicsView.DragMode.ScrollHandDrag
+        )
+
         self.setTransformationAnchor(
             QGraphicsView.ViewportAnchor.AnchorUnderMouse
         )
+
         self.setResizeAnchor(
             QGraphicsView.ViewportAnchor.AnchorUnderMouse
         )
 
-        # Zoom configuration.
         self._zoom_factor = 1.15
         self._min_zoom = 0.25
         self._max_zoom = 4.0
 
-        self.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAsNeeded
-        )
-        self.setVerticalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAsNeeded
-        )
-        self.setBackgroundBrush(QColor("#101418"))
-
         self._dfa: DFA | None = None
-        self._nodes: dict[int, QGraphicsEllipseItem] = {}
-        self._inner_nodes: dict[int, QGraphicsEllipseItem] = {}
-        self._state_labels: dict[int, QGraphicsSimpleTextItem] = {}
+
+        self._nodes: dict[
+            int,
+            QGraphicsPathItem,
+        ] = {}
+
+        self._inner_nodes: dict[
+            int,
+            QGraphicsPathItem,
+        ] = {}
+
         self._edges: dict[
             tuple[int, int],
             list[QGraphicsPathItem | QGraphicsPolygonItem],
         ] = {}
+
         self._edge_labels: dict[
             tuple[int, int],
             QGraphicsSimpleTextItem,
         ] = {}
-        self._start_items: list[object] = []
-        self._active_state: int | None = None
-        self._active_edge: tuple[int, int] | None = None
 
-        self._node_pen = QPen(QColor("#9aa5b1"), 2.0)
-        self._node_brush = QBrush(QColor("#1a222b"))
-        self._accept_pen = QPen(QColor("#d5dde7"), 2.0)
-        self._active_pen = QPen(QColor("#77bdfb"), 4.0)
-        self._edge_pen = QPen(QColor("#8693a0"), 2.0)
+        self._start_items: list[
+            QGraphicsPathItem
+            | QGraphicsPolygonItem
+            | QGraphicsSimpleTextItem
+        ] = []
+
+        self._node_pen = QPen(
+            QColor("#d8e0e8"),
+            2,
+        )
+
+        self._accept_pen = QPen(
+            QColor("#8bc8f5"),
+            2,
+        )
+
+        self._edge_pen = QPen(
+            QColor("#8f9aa5"),
+            2,
+        )
+
         self._other_edge_pen = QPen(
-            QColor("#5c6670"),
+            QColor("#66737f"),
             1.5,
             Qt.PenStyle.DashLine,
         )
 
     # ------------------------------------------------------------------
-    # Zoom / Pan
+    # Public API
     # ------------------------------------------------------------------
 
-    def wheelEvent(self, event) -> None:
-        """Zoom the graph with the mouse wheel."""
+    def set_dfa(self, dfa: DFA) -> None:
+        self._dfa = dfa
+        self._render_dfa()
+        self.fit_graph()
 
-        if event.angleDelta().y() > 0:
-            factor = self._zoom_factor
-        else:
-            factor = 1 / self._zoom_factor
+    def clear_graph(self) -> None:
+        scene = self.scene()
 
-        current_scale = self.transform().m11()
-        new_scale = current_scale * factor
+        if scene is not None:
+            scene.clear()
 
-        if self._min_zoom <= new_scale <= self._max_zoom:
-            self.scale(factor, factor)
+        self._dfa = None
+        self._nodes.clear()
+        self._inner_nodes.clear()
+        self._edges.clear()
+        self._edge_labels.clear()
+        self._start_items.clear()
+
+    # ------------------------------------------------------------------
+    # Zoom controls
+    # ------------------------------------------------------------------
 
     def zoom_in(self) -> None:
-        """Zoom in one step."""
+        current = self.transform().m11()
+        if current >= self._max_zoom:
+            return
 
-        current_scale = self.transform().m11()
-        new_scale = current_scale * self._zoom_factor
-
-        if new_scale <= self._max_zoom:
-            self.scale(
-                self._zoom_factor,
-                self._zoom_factor,
-            )
+        self.scale(
+            self._zoom_factor,
+            self._zoom_factor,
+        )
 
     def zoom_out(self) -> None:
-        """Zoom out one step."""
+        current = self.transform().m11()
+        if current <= self._min_zoom:
+            return
 
-        current_scale = self.transform().m11()
-        new_scale = current_scale / self._zoom_factor
-
-        if new_scale >= self._min_zoom:
-            self.scale(
-                1 / self._zoom_factor,
-                1 / self._zoom_factor,
-            )
+        self.scale(
+            1 / self._zoom_factor,
+            1 / self._zoom_factor,
+        )
 
     def fit_graph(self) -> None:
-        """Fit the complete DFA graph inside the view."""
-
         scene = self.scene()
 
         if scene is None:
             return
 
-        scene_rect = scene.sceneRect()
+        rect = scene.itemsBoundingRect()
 
-        if scene_rect.isNull() or scene_rect.width() <= 0:
+        if rect.isNull():
             return
 
-        self.resetTransform()
+        rect.adjust(
+            -60,
+            -60,
+            60,
+            60,
+        )
 
         self.fitInView(
-            scene_rect,
+            rect,
             Qt.AspectRatioMode.KeepAspectRatio,
         )
 
     # ------------------------------------------------------------------
-    # Graph management
+    # Rendering
     # ------------------------------------------------------------------
 
-    def clear_graph(self) -> None:
-        scene = QGraphicsScene(self)
-        scene.setBackgroundBrush(QColor("#101418"))
-        self.setScene(scene)
+    def _render_dfa(self) -> None:
+        if self._dfa is None:
+            return
+
+        scene = self.scene()
+        assert scene is not None
+
+        scene.clear()
 
         self._nodes.clear()
         self._inner_nodes.clear()
-        self._state_labels.clear()
         self._edges.clear()
         self._edge_labels.clear()
         self._start_items.clear()
-        self._active_state = None
-        self._active_edge = None
-        self._dfa = None
 
-    def set_dfa(self, dfa: DFA) -> None:
-        self._dfa = dfa
+        positions = self._calculate_positions(
+            self._dfa
+        )
 
-        scene = QGraphicsScene(self)
-        scene.setBackgroundBrush(QColor("#101418"))
-        self.setScene(scene)
+        self._draw_edges(
+            self._dfa,
+            positions,
+        )
 
-        self._nodes.clear()
-        self._inner_nodes.clear()
-        self._state_labels.clear()
-        self._edges.clear()
-        self._edge_labels.clear()
-        self._start_items.clear()
-        self._active_state = 0
-        self._active_edge = None
+        self._draw_nodes(
+            self._dfa,
+            positions,
+        )
 
-        positions = self._layout_states(dfa)
-
-        self._draw_edges(dfa, positions)
-        self._draw_nodes(dfa, positions)
-        self._draw_start_indicator(positions[0])
+        self._draw_start_indicator(
+            positions[0]
+        )
 
         scene.setSceneRect(
-            QRectF(
-                0,
-                0,
-                max(
-                    900.0,
-                    positions[-1].x()
-                    + self.SIDE_PADDING
-                    + self.NODE_RADIUS,
-                ),
-                self.TOP_PADDING
-                + self.BOTTOM_PADDING
-                + 2 * self.NODE_RADIUS
-                + 2 * self.ARC_HEIGHT,
+            scene.itemsBoundingRect().adjusted(
+                -80,
+                -80,
+                80,
+                80,
             )
         )
 
-        self.fit_graph()
-        self.highlight_state(0)
-
     # ------------------------------------------------------------------
-    # Layout
+    # Node positioning
     # ------------------------------------------------------------------
 
-    def _layout_states(self, dfa: DFA) -> list[QPointF]:
-        baseline = self.TOP_PADDING + self.NODE_RADIUS + 10
-        center_x = self.SIDE_PADDING + self.NODE_RADIUS
+    def _calculate_positions(
+        self,
+        dfa: DFA,
+    ) -> list[QPointF]:
 
-        return [
-            QPointF(
-                center_x + i * self.HORIZONTAL_GAP,
-                baseline,
+        positions: list[QPointF] = []
+
+        state_count = dfa.state_count
+
+        spacing = self.HORIZONTAL_GAP
+
+        total_width = (
+            max(0, state_count - 1)
+            * spacing
+        )
+
+        start_x = -total_width / 2
+
+        for state in range(state_count):
+            positions.append(
+                QPointF(
+                    start_x + state * spacing,
+                    0,
+                )
             )
-            for i in range(dfa.state_count)
-        ]
+
+        return positions
 
     # ------------------------------------------------------------------
     # Nodes
@@ -240,87 +271,130 @@ class DFAGraphView(QGraphicsView):
         dfa: DFA,
         positions: list[QPointF],
     ) -> None:
+
         scene = self.scene()
         assert scene is not None
 
-        for state, pos in enumerate(positions):
-            outer = QGraphicsEllipseItem(
-                -self.NODE_RADIUS,
-                -self.NODE_RADIUS,
-                2 * self.NODE_RADIUS,
-                2 * self.NODE_RADIUS,
-            )
-
-            outer.setPos(pos)
-            outer.setBrush(self._node_brush)
-            outer.setPen(
+        for state, position in enumerate(
+            positions
+        ):
+            ellipse = scene.addEllipse(
+                position.x()
+                - self.NODE_RADIUS,
+                position.y()
+                - self.NODE_RADIUS,
+                self.NODE_RADIUS * 2,
+                self.NODE_RADIUS * 2,
                 self._accept_pen
                 if state == dfa.accepting_state
-                else self._node_pen
+                else self._node_pen,
+                QBrush(QColor("#17212a")),
             )
-            outer.setZValue(10)
 
-            scene.addItem(outer)
-            self._nodes[state] = outer
+            ellipse.setZValue(5)
+
+            self._nodes[state] = ellipse
 
             if state == dfa.accepting_state:
-                inner_radius = self.NODE_RADIUS - 6
-
-                inner = QGraphicsEllipseItem(
-                    -inner_radius,
-                    -inner_radius,
-                    2 * inner_radius,
-                    2 * inner_radius,
+                inner_radius = (
+                    self.NODE_RADIUS - 6
                 )
 
-                inner.setPos(pos)
-                inner.setBrush(Qt.BrushStyle.NoBrush)
-                inner.setPen(self._accept_pen)
-                inner.setZValue(10.1)
+                inner = scene.addEllipse(
+                    position.x()
+                    - inner_radius,
+                    position.y()
+                    - inner_radius,
+                    inner_radius * 2,
+                    inner_radius * 2,
+                    self._accept_pen,
+                    Qt.BrushStyle.NoBrush,
+                )
 
-                scene.addItem(inner)
+                inner.setZValue(6)
+
                 self._inner_nodes[state] = inner
 
-            label = QGraphicsSimpleTextItem(f"q{state}")
+            label = QGraphicsSimpleTextItem(
+                f"q{state}"
+            )
 
-            font = QFont("Sans Serif", 10)
+            font = QFont(
+                "Sans Serif",
+                10,
+            )
             font.setBold(True)
 
             label.setFont(font)
-            label.setBrush(QBrush(QColor("#f2f5f7")))
-            label.setZValue(11)
 
-            label.setPos(
-                pos.x() - label.boundingRect().width() / 2,
-                pos.y() - label.boundingRect().height() / 2,
+            label.setBrush(
+                QBrush(
+                    QColor("#edf2f5")
+                )
             )
 
+            rect = label.boundingRect()
+
+            label.setPos(
+                position.x()
+                - rect.width() / 2,
+                position.y()
+                - rect.height() / 2,
+            )
+
+            label.setZValue(7)
+
             scene.addItem(label)
-            self._state_labels[state] = label
 
     # ------------------------------------------------------------------
     # START indicator
     # ------------------------------------------------------------------
 
-    def _draw_start_indicator(self, q0: QPointF) -> None:
+    def _draw_start_indicator(
+        self,
+        q0: QPointF,
+    ) -> None:
+
         scene = self.scene()
         assert scene is not None
 
-        start_x = q0.x() - self.NODE_RADIUS - 60
+        start_x = (
+            q0.x()
+            - self.NODE_RADIUS
+            - 60
+        )
+
         y = q0.y()
 
         path = QGraphicsPathItem()
 
-        line_path = QPainterPath(QPointF(start_x, y))
-        line_path.lineTo(
+        line_path = QPainterPath(
             QPointF(
-                q0.x() - self.NODE_RADIUS - 4,
+                start_x,
                 y,
             )
         )
 
-        path.setPath(line_path)
-        path.setPen(QPen(QColor("#b8c2cc"), 2))
+        line_path.lineTo(
+            QPointF(
+                q0.x()
+                - self.NODE_RADIUS
+                - 4,
+                y,
+            )
+        )
+
+        path.setPath(
+            line_path
+        )
+
+        path.setPen(
+            QPen(
+                QColor("#b8c2cc"),
+                2,
+            )
+        )
+
         path.setZValue(3)
 
         scene.addItem(path)
@@ -329,41 +403,76 @@ class DFAGraphView(QGraphicsView):
             QPolygonF(
                 [
                     QPointF(
-                        q0.x() - self.NODE_RADIUS - 4,
+                        q0.x()
+                        - self.NODE_RADIUS
+                        - 4,
                         y,
                     ),
                     QPointF(
-                        q0.x() - self.NODE_RADIUS - 14,
+                        q0.x()
+                        - self.NODE_RADIUS
+                        - 14,
                         y - 6,
                     ),
                     QPointF(
-                        q0.x() - self.NODE_RADIUS - 14,
+                        q0.x()
+                        - self.NODE_RADIUS
+                        - 14,
                         y + 6,
                     ),
                 ]
             )
         )
 
-        arrow.setBrush(QBrush(QColor("#b8c2cc")))
-        arrow.setPen(QPen(Qt.PenStyle.NoPen))
+        arrow.setBrush(
+            QBrush(
+                QColor("#b8c2cc")
+            )
+        )
+
+        arrow.setPen(
+            QPen(
+                Qt.PenStyle.NoPen
+            )
+        )
+
         arrow.setZValue(4)
 
         scene.addItem(arrow)
 
-        text = QGraphicsSimpleTextItem("START")
+        text = QGraphicsSimpleTextItem(
+            "START"
+        )
 
-        font = QFont("Sans Serif", 8)
+        font = QFont(
+            "Sans Serif",
+            8,
+        )
         font.setBold(True)
 
         text.setFont(font)
-        text.setBrush(QBrush(QColor("#b8c2cc")))
-        text.setPos(start_x - 6, y - 26)
+
+        text.setBrush(
+            QBrush(
+                QColor("#b8c2cc")
+            )
+        )
+
+        text.setPos(
+            start_x - 6,
+            y - 26,
+        )
+
         text.setZValue(4)
 
         scene.addItem(text)
 
         self._start_items.extend(
-            [path, arrow, text]
+            [
+                path,
+                arrow,
+                text,
+            ]
         )
 
     # ------------------------------------------------------------------
@@ -373,15 +482,23 @@ class DFAGraphView(QGraphicsView):
     @staticmethod
     def _group_edges(
         dfa: DFA,
-    ) -> dict[tuple[int, int], list[str]]:
+    ) -> dict[
+        tuple[int, int],
+        list[str],
+    ]:
+
         grouped: dict[
             tuple[int, int],
             list[str],
         ] = {}
 
-        for source in range(dfa.state_count):
+        for source in range(
+            dfa.state_count
+        ):
             for symbol in dfa.transition_symbols():
-                target = dfa.transitions[source][symbol]
+                target = dfa.transitions[
+                    source
+                ][symbol]
 
                 grouped.setdefault(
                     (source, target),
@@ -399,26 +516,48 @@ class DFAGraphView(QGraphicsView):
         dfa: DFA,
         positions: list[QPointF],
     ) -> None:
+
         scene = self.scene()
         assert scene is not None
 
-        grouped = self._group_edges(dfa)
+        grouped = self._group_edges(
+            dfa
+        )
 
-        for (source, target), symbols in grouped.items():
+        for (
+            source,
+            target,
+        ), symbols in grouped.items():
+
             start = positions[source]
             end = positions[target]
 
-            label_text = self._format_symbols(symbols)
+            label_text = (
+                self._format_symbols(
+                    symbols
+                )
+            )
 
             if source == target:
-                path, label_pos = self._self_loop(start)
-            else:
-                direction = 1 if target > source else -1
+                path, label_pos = (
+                    self._self_loop(
+                        start
+                    )
+                )
 
-                path, label_pos = self._curved_edge(
-                    start,
-                    end,
-                    direction,
+            else:
+                direction = (
+                    1
+                    if target > source
+                    else -1
+                )
+
+                path, label_pos = (
+                    self._curved_edge(
+                        start,
+                        end,
+                        direction,
+                    )
                 )
 
             edge_pen = self._edge_pen
@@ -427,52 +566,82 @@ class DFAGraphView(QGraphicsView):
                 OTHER_SYMBOL in symbols
                 and len(symbols) == 1
             ):
-                edge_pen = self._other_edge_pen
+                edge_pen = (
+                    self._other_edge_pen
+                )
 
-            edge = QGraphicsPathItem(path)
+            edge = QGraphicsPathItem(
+                path
+            )
 
-            edge.setPen(edge_pen)
-            edge.setBrush(Qt.BrushStyle.NoBrush)
+            edge.setPen(
+                edge_pen
+            )
+
+            edge.setBrush(
+                Qt.BrushStyle.NoBrush
+            )
+
             edge.setZValue(1)
 
             scene.addItem(edge)
 
-            arrow = self._make_arrow(path)
+            arrow = self._make_arrow(
+                path
+            )
 
             arrow.setBrush(
-                QBrush(edge_pen.color())
+                QBrush(
+                    edge_pen.color()
+                )
             )
+
             arrow.setPen(
-                QPen(Qt.PenStyle.NoPen)
+                QPen(
+                    Qt.PenStyle.NoPen
+                )
             )
+
             arrow.setZValue(2)
 
             scene.addItem(arrow)
 
-            label = QGraphicsSimpleTextItem(
-                label_text
+            label = (
+                QGraphicsSimpleTextItem(
+                    label_text
+                )
             )
 
-            font = QFont("Sans Serif", 8)
+            font = QFont(
+                "Sans Serif",
+                8,
+            )
             font.setBold(True)
 
             label.setFont(font)
+
             label.setBrush(
-                QBrush(QColor("#c7d0d8"))
+                QBrush(
+                    QColor("#c7d0d8")
+                )
             )
 
             label.setPos(
                 label_pos.x()
-                - label.boundingRect().width() / 2,
+                - label.boundingRect().width()
+                / 2,
                 label_pos.y()
-                - label.boundingRect().height() / 2,
+                - label.boundingRect().height()
+                / 2,
             )
 
             label.setZValue(4)
 
             scene.addItem(label)
 
-            self._edges[(source, target)] = [
+            self._edges[
+                (source, target)
+            ] = [
                 edge,
                 arrow,
             ]
@@ -485,21 +654,39 @@ class DFAGraphView(QGraphicsView):
     def _format_symbols(
         symbols: list[str],
     ) -> str:
+
         readable: list[str] = []
 
         for symbol in symbols:
-            if symbol == OTHER_SYMBOL:
-                readable.append("OTHER")
-            elif symbol == "\n":
-                readable.append("\\n")
-            elif symbol == "\t":
-                readable.append("\\t")
-            elif symbol == " ":
-                readable.append("SPACE")
-            else:
-                readable.append(symbol)
 
-        return ", ".join(readable)
+            if symbol == OTHER_SYMBOL:
+                readable.append(
+                    "OTHER"
+                )
+
+            elif symbol == "\n":
+                readable.append(
+                    "\\n"
+                )
+
+            elif symbol == "\t":
+                readable.append(
+                    "\\t"
+                )
+
+            elif symbol == " ":
+                readable.append(
+                    "SPACE"
+                )
+
+            else:
+                readable.append(
+                    symbol
+                )
+
+        return ", ".join(
+            readable
+        )
 
     # ------------------------------------------------------------------
     # Curved edges
@@ -510,14 +697,20 @@ class DFAGraphView(QGraphicsView):
         start: QPointF,
         end: QPointF,
         direction: int,
-    ) -> tuple[QPainterPath, QPointF]:
+    ) -> tuple[
+        QPainterPath,
+        QPointF,
+    ]:
 
         dx = end.x() - start.x()
         dy = end.y() - start.y()
 
         distance = max(
             1.0,
-            math.hypot(dx, dy),
+            math.hypot(
+                dx,
+                dy,
+            ),
         )
 
         ux = dx / distance
@@ -527,13 +720,17 @@ class DFAGraphView(QGraphicsView):
         py = ux
 
         start_point = QPointF(
-            start.x() + ux * self.NODE_RADIUS,
-            start.y() + uy * self.NODE_RADIUS,
+            start.x()
+            + ux * self.NODE_RADIUS,
+            start.y()
+            + uy * self.NODE_RADIUS,
         )
 
         end_point = QPointF(
-            end.x() - ux * self.NODE_RADIUS,
-            end.y() - uy * self.NODE_RADIUS,
+            end.x()
+            - ux * self.NODE_RADIUS,
+            end.y()
+            - uy * self.NODE_RADIUS,
         )
 
         offset = (
@@ -542,18 +739,32 @@ class DFAGraphView(QGraphicsView):
             * min(
                 1.0,
                 distance
-                / (self.HORIZONTAL_GAP * 4),
+                / (
+                    self.HORIZONTAL_GAP
+                    * 4
+                ),
             )
         )
 
         control = QPointF(
-            (start_point.x() + end_point.x()) / 2
+            (
+                start_point.x()
+                + end_point.x()
+            )
+            / 2
             + px * offset,
-            (start_point.y() + end_point.y()) / 2
+            (
+                start_point.y()
+                + end_point.y()
+            )
+            / 2
             + py * offset,
         )
 
-        path = QPainterPath(start_point)
+        path = QPainterPath(
+            start_point
+        )
+
         path.quadTo(
             control,
             end_point,
@@ -566,7 +777,10 @@ class DFAGraphView(QGraphicsView):
             - py * direction * 10,
         )
 
-        return path, label_point
+        return (
+            path,
+            label_point,
+        )
 
     # ------------------------------------------------------------------
     # Self-loop
@@ -575,19 +789,28 @@ class DFAGraphView(QGraphicsView):
     def _self_loop(
         self,
         center: QPointF,
-    ) -> tuple[QPainterPath, QPointF]:
+    ) -> tuple[
+        QPainterPath,
+        QPointF,
+    ]:
 
         start = QPointF(
             center.x() - 12,
-            center.y() - self.NODE_RADIUS + 2,
+            center.y()
+            - self.NODE_RADIUS
+            + 2,
         )
 
         end = QPointF(
             center.x() + 12,
-            center.y() - self.NODE_RADIUS + 2,
+            center.y()
+            - self.NODE_RADIUS
+            + 2,
         )
 
-        path = QPainterPath(start)
+        path = QPainterPath(
+            start
+        )
 
         path.cubicTo(
             QPointF(
@@ -606,7 +829,10 @@ class DFAGraphView(QGraphicsView):
             center.y() - 102,
         )
 
-        return path, label_pos
+        return (
+            path,
+            label_pos,
+        )
 
     # ------------------------------------------------------------------
     # Arrow
@@ -617,12 +843,19 @@ class DFAGraphView(QGraphicsView):
         path: QPainterPath,
     ) -> QGraphicsPolygonItem:
 
-        point = path.pointAtPercent(0.995)
-        previous = path.pointAtPercent(0.975)
+        point = path.pointAtPercent(
+            0.995
+        )
+
+        previous = path.pointAtPercent(
+            0.975
+        )
 
         angle = math.atan2(
-            point.y() - previous.y(),
-            point.x() - previous.x(),
+            point.y()
+            - previous.y(),
+            point.x()
+            - previous.x(),
         )
 
         size = 8.0
@@ -631,173 +864,36 @@ class DFAGraphView(QGraphicsView):
 
         p2 = QPointF(
             point.x()
-            - size * math.cos(
+            - size
+            * math.cos(
                 angle - math.pi / 6
             ),
             point.y()
-            - size * math.sin(
+            - size
+            * math.sin(
                 angle - math.pi / 6
             ),
         )
 
         p3 = QPointF(
             point.x()
-            - size * math.cos(
+            - size
+            * math.cos(
                 angle + math.pi / 6
             ),
             point.y()
-            - size * math.sin(
+            - size
+            * math.sin(
                 angle + math.pi / 6
             ),
         )
 
         return QGraphicsPolygonItem(
-            QPolygonF([p1, p2, p3])
-        )
-
-    # ------------------------------------------------------------------
-    # Highlighting
-    # ------------------------------------------------------------------
-
-    def highlight_state(
-        self,
-        state: int | None,
-    ) -> None:
-
-        self._active_state = state
-
-        for index, node in self._nodes.items():
-            if index == state:
-                node.setPen(self._active_pen)
-
-            elif (
-                self._dfa is not None
-                and index == self._dfa.accepting_state
-            ):
-                node.setPen(self._accept_pen)
-
-            else:
-                node.setPen(self._node_pen)
-
-        for index, inner in self._inner_nodes.items():
-            inner.setPen(
-                self._active_pen
-                if index == state
-                else self._accept_pen
-            )
-
-    def highlight_transition(
-        self,
-        source: int,
-        target: int,
-    ) -> None:
-
-        self._active_edge = (
-            source,
-            target,
-        )
-
-        for key, items in self._edges.items():
-            if key == (source, target):
-                for item in items:
-                    if isinstance(
-                        item,
-                        QGraphicsPathItem,
-                    ):
-                        item.setPen(
-                            self._active_pen
-                        )
-
-                    elif isinstance(
-                        item,
-                        QGraphicsPolygonItem,
-                    ):
-                        item.setBrush(
-                            QBrush(
-                                self._active_pen.color()
-                            )
-                        )
-
-            else:
-                symbols = self._dfa.transitions[
-                    key[0]
+            QPolygonF(
+                [
+                    p1,
+                    p2,
+                    p3,
                 ]
-
-                target_symbols = [
-                    s
-                    for s, t in symbols.items()
-                    if t == key[1]
-                ]
-
-                use_other = (
-                    OTHER_SYMBOL in target_symbols
-                    and len(target_symbols) == 1
-                )
-
-                for item in items:
-                    if isinstance(
-                        item,
-                        QGraphicsPathItem,
-                    ):
-                        item.setPen(
-                            self._other_edge_pen
-                            if use_other
-                            else self._edge_pen
-                        )
-
-                    elif isinstance(
-                        item,
-                        QGraphicsPolygonItem,
-                    ):
-                        item.setBrush(
-                            QBrush(
-                                (
-                                    self._other_edge_pen
-                                    if use_other
-                                    else self._edge_pen
-                                ).color()
-                            )
-                        )
-
-    def clear_highlight(self) -> None:
-        self._active_edge = None
-
-        if self._dfa is None:
-            return
-
-        for key, items in self._edges.items():
-            symbols = self._dfa.transitions[
-                key[0]
-            ]
-
-            target_symbols = [
-                s
-                for s, t in symbols.items()
-                if t == key[1]
-            ]
-
-            use_other = (
-                OTHER_SYMBOL in target_symbols
-                and len(target_symbols) == 1
             )
-
-            pen = (
-                self._other_edge_pen
-                if use_other
-                else self._edge_pen
-            )
-
-            for item in items:
-                if isinstance(
-                    item,
-                    QGraphicsPathItem,
-                ):
-                    item.setPen(pen)
-
-                elif isinstance(
-                    item,
-                    QGraphicsPolygonItem,
-                ):
-                    item.setBrush(
-                        QBrush(pen.color())
-                    )
+        )

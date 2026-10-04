@@ -253,7 +253,7 @@ class MainWindow(QMainWindow):
         self.text_edit = QPlainTextEdit()
 
         self.text_edit.setPlaceholderText(
-            "Enter the text to search..."
+            "Enter the complete input string"
         )
 
         self.text_edit.setMinimumHeight(
@@ -283,7 +283,7 @@ class MainWindow(QMainWindow):
         self.pattern_edit = QLineEdit()
 
         self.pattern_edit.setPlaceholderText(
-            "Enter the pattern..."
+            "Enter the pattern for which the DFA is to be constructed"
         )
 
         input_layout.addWidget(
