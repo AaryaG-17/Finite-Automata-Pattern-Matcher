@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtGui import QAction, QColor, QFont
+from PySide6.QtGui import QAction, QColor
 from PySide6.QtWidgets import (
     QApplication,
     QGridLayout,
@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 
 from .dfa import DFA
 from .graph_view import DFAGraphView
+from .matcher import find_matches
 
 
 APP_STYLE = """
@@ -94,6 +95,11 @@ QLabel#subtitle {
     color: #9da8b2;
 }
 
+QLabel#result {
+    color: #9dd7ff;
+    font-weight: 600;
+}
+
 QHeaderView::section {
     background: #1b232b;
     color: #dce4ea;
@@ -136,47 +142,23 @@ class MainWindow(QMainWindow):
     def _build_menu(self) -> None:
         file_menu = self.menuBar().addMenu("File")
 
-        reset_action = QAction(
-            "Reset",
-            self,
-        )
+        reset_action = QAction("Reset", self)
         reset_action.setShortcut("Ctrl+R")
-        reset_action.triggered.connect(
-            self._reset_all
-        )
-
-        file_menu.addAction(
-            reset_action
-        )
+        reset_action.triggered.connect(self._reset_all)
+        file_menu.addAction(reset_action)
 
         file_menu.addSeparator()
 
-        exit_action = QAction(
-            "Exit",
-            self,
-        )
+        exit_action = QAction("Exit", self)
         exit_action.setShortcut("Ctrl+Q")
-        exit_action.triggered.connect(
-            QApplication.quit
-        )
-
-        file_menu.addAction(
-            exit_action
-        )
+        exit_action.triggered.connect(QApplication.quit)
+        file_menu.addAction(exit_action)
 
         help_menu = self.menuBar().addMenu("Help")
 
-        about_action = QAction(
-            "About",
-            self,
-        )
-        about_action.triggered.connect(
-            self._show_about
-        )
-
-        help_menu.addAction(
-            about_action
-        )
+        about_action = QAction("About", self)
+        about_action.triggered.connect(self._show_about)
+        help_menu.addAction(about_action)
 
     # ------------------------------------------------------------------
     # Main UI
@@ -186,79 +168,41 @@ class MainWindow(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
 
-        root = QVBoxLayout(
-            central
-        )
-
-        root.setContentsMargins(
-            14,
-            12,
-            14,
-            12,
-        )
-
+        root = QVBoxLayout(central)
+        root.setContentsMargins(14, 12, 14, 12)
         root.setSpacing(10)
-
-        # --------------------------------------------------------------
-        # Title
-        # --------------------------------------------------------------
 
         title = QLabel(
             "Finite Automata Pattern Matcher"
         )
         title.setObjectName("title")
-
         root.addWidget(title)
 
         subtitle = QLabel(
-            "Build a deterministic finite automaton from a pattern, "
-            "then use the machine to process the entered text."
+            "Construct a DFA from a pattern and use it to "
+            "find the pattern in the entered text."
         )
         subtitle.setObjectName("subtitle")
-
         root.addWidget(subtitle)
 
         # --------------------------------------------------------------
-        # Input section
+        # Input
         # --------------------------------------------------------------
 
-        input_box = QGroupBox(
-            "Input"
-        )
+        input_box = QGroupBox("Input")
+        input_layout = QGridLayout(input_box)
 
-        input_layout = QGridLayout(
-            input_box
-        )
+        input_layout.setHorizontalSpacing(10)
+        input_layout.setVerticalSpacing(8)
 
-        input_layout.setHorizontalSpacing(
-            10
-        )
+        text_label = QLabel("Text")
+        input_layout.addWidget(text_label, 0, 0)
 
-        input_layout.setVerticalSpacing(
-            8
-        )
-
-        # Text label
-        text_label = QLabel(
-            "Text"
-        )
-
-        input_layout.addWidget(
-            text_label,
-            0,
-            0,
-        )
-
-        # Text input
         self.text_edit = QPlainTextEdit()
-
         self.text_edit.setPlaceholderText(
             "Enter the complete input string"
         )
-
-        self.text_edit.setMinimumHeight(
-            90
-        )
+        self.text_edit.setMinimumHeight(90)
 
         input_layout.addWidget(
             self.text_edit,
@@ -268,22 +212,12 @@ class MainWindow(QMainWindow):
             4,
         )
 
-        # Pattern label
-        pattern_label = QLabel(
-            "Pattern"
-        )
+        pattern_label = QLabel("Pattern")
+        input_layout.addWidget(pattern_label, 1, 0)
 
-        input_layout.addWidget(
-            pattern_label,
-            1,
-            0,
-        )
-
-        # Pattern input
         self.pattern_edit = QLineEdit()
-
         self.pattern_edit.setPlaceholderText(
-            "Enter the pattern for which the DFA is to be constructed"
+            "Enter the pattern"
         )
 
         input_layout.addWidget(
@@ -294,18 +228,9 @@ class MainWindow(QMainWindow):
             2,
         )
 
-        # Build button
-        self.build_button = QPushButton(
-            "Build DFA"
-        )
-
-        self.build_button.setObjectName(
-            "primaryButton"
-        )
-
-        self.build_button.clicked.connect(
-            self._build_dfa
-        )
+        self.build_button = QPushButton("Build DFA")
+        self.build_button.setObjectName("primaryButton")
+        self.build_button.clicked.connect(self._build_dfa)
 
         input_layout.addWidget(
             self.build_button,
@@ -313,14 +238,8 @@ class MainWindow(QMainWindow):
             3,
         )
 
-        # Reset button
-        self.reset_button = QPushButton(
-            "Reset"
-        )
-
-        self.reset_button.clicked.connect(
-            self._reset_all
-        )
+        self.reset_button = QPushButton("Reset")
+        self.reset_button.clicked.connect(self._reset_all)
 
         input_layout.addWidget(
             self.reset_button,
@@ -328,114 +247,74 @@ class MainWindow(QMainWindow):
             4,
         )
 
-        root.addWidget(
-            input_box
+        self.result_label = QLabel("Result: —")
+        self.result_label.setObjectName("result")
+
+        input_layout.addWidget(
+            self.result_label,
+            2,
+            1,
+            1,
+            4,
         )
+
+        root.addWidget(input_box)
 
         # --------------------------------------------------------------
         # Main content
         # --------------------------------------------------------------
 
         splitter = QSplitter()
+        splitter.setChildrenCollapsible(False)
 
-        splitter.setChildrenCollapsible(
-            False
-        )
-
-        root.addWidget(
-            splitter,
-            1,
-        )
+        root.addWidget(splitter, 1)
 
         # --------------------------------------------------------------
-        # DFA visualization
+        # DFA graph
         # --------------------------------------------------------------
 
-        graph_box = QGroupBox(
-            "DFA State Machine"
-        )
-
-        graph_layout = QVBoxLayout(
-            graph_box
-        )
+        graph_box = QGroupBox("DFA State Machine")
+        graph_layout = QVBoxLayout(graph_box)
 
         graph_controls = QHBoxLayout()
 
-        zoom_out_button = QPushButton(
-            "−"
-        )
-
-        zoom_out_button.setToolTip(
-            "Zoom out"
-        )
-
+        zoom_out_button = QPushButton("−")
+        zoom_out_button.setToolTip("Zoom out")
         zoom_out_button.clicked.connect(
             lambda: self.graph_view.zoom_out()
         )
+        graph_controls.addWidget(zoom_out_button)
 
-        graph_controls.addWidget(
-            zoom_out_button
-        )
-
-        zoom_in_button = QPushButton(
-            "+"
-        )
-
-        zoom_in_button.setToolTip(
-            "Zoom in"
-        )
-
+        zoom_in_button = QPushButton("+")
+        zoom_in_button.setToolTip("Zoom in")
         zoom_in_button.clicked.connect(
             lambda: self.graph_view.zoom_in()
         )
+        graph_controls.addWidget(zoom_in_button)
 
-        graph_controls.addWidget(
-            zoom_in_button
-        )
-
-        fit_button = QPushButton(
-            "Fit"
-        )
-
+        fit_button = QPushButton("Fit")
         fit_button.setToolTip(
             "Fit the complete DFA in the view"
         )
-
         fit_button.clicked.connect(
             lambda: self.graph_view.fit_graph()
         )
-
-        graph_controls.addWidget(
-            fit_button
-        )
+        graph_controls.addWidget(fit_button)
 
         graph_controls.addStretch()
-
-        graph_layout.addLayout(
-            graph_controls
-        )
+        graph_layout.addLayout(graph_controls)
 
         self.graph_view = DFAGraphView()
+        graph_layout.addWidget(self.graph_view)
 
-        graph_layout.addWidget(
-            self.graph_view
-        )
-
-        splitter.addWidget(
-            graph_box
-        )
+        splitter.addWidget(graph_box)
 
         # --------------------------------------------------------------
         # Transition table
         # --------------------------------------------------------------
 
-        table_box = QGroupBox(
-            "Transition Table"
-        )
-
-        table_layout = QVBoxLayout(
-            table_box
-        )
+        table_box = QGroupBox("Transition Table")
+        table_layout = QVBoxLayout(table_box)
 
         self.table = QTableWidget()
 
@@ -447,31 +326,24 @@ class MainWindow(QMainWindow):
             QTableWidget.SelectionMode.NoSelection
         )
 
-        self.table.verticalHeader().setVisible(
-            False
-        )
+        self.table.verticalHeader().setVisible(False)
 
         self.table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.Stretch
         )
 
-        table_layout.addWidget(
-            self.table
-        )
+        table_layout.addWidget(self.table)
 
-        splitter.addWidget(
-            table_box
-        )
+        splitter.addWidget(table_box)
 
-        splitter.setSizes(
-            [1000, 430]
-        )
+        splitter.setSizes([1000, 430])
 
     # ------------------------------------------------------------------
-    # DFA construction
+    # DFA construction + pattern matching
     # ------------------------------------------------------------------
 
     def _build_dfa(self) -> None:
+        text = self.text_edit.toPlainText()
         pattern = self.pattern_edit.text()
 
         if not pattern:
@@ -492,14 +364,9 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            self.dfa = DFA.build(
-                pattern
-            )
+            self.dfa = DFA.build(pattern)
 
-        except (
-            TypeError,
-            ValueError,
-        ) as exc:
+        except (TypeError, ValueError) as exc:
             QMessageBox.warning(
                 self,
                 "Cannot build DFA",
@@ -507,11 +374,28 @@ class MainWindow(QMainWindow):
             )
             return
 
-        self.graph_view.set_dfa(
-            self.dfa
-        )
+        self.graph_view.set_dfa(self.dfa)
 
         self._populate_transition_table()
+
+        matches = find_matches(
+            text,
+            self.dfa,
+        )
+
+        if matches:
+            positions = ", ".join(
+                str(position)
+                for position in matches
+            )
+
+            self.result_label.setText(
+                f"Result: Pattern found at positions {positions}"
+            )
+        else:
+            self.result_label.setText(
+                "Result: Pattern not found"
+            )
 
     # ------------------------------------------------------------------
     # Transition table
@@ -521,9 +405,7 @@ class MainWindow(QMainWindow):
         if self.dfa is None:
             return
 
-        symbols = (
-            self.dfa.transition_symbols()
-        )
+        symbols = self.dfa.transition_symbols()
 
         self.table.clear()
 
@@ -554,10 +436,7 @@ class MainWindow(QMainWindow):
                     f"→ q{state}"
                 )
 
-            if (
-                state
-                == self.dfa.accepting_state
-            ):
+            if state == self.dfa.accepting_state:
                 state_item.setText(
                     (
                         "→ "
@@ -577,20 +456,15 @@ class MainWindow(QMainWindow):
                 symbols,
                 start=1,
             ):
-                target = (
-                    self.dfa.transitions[
-                        state
-                    ][symbol]
-                )
+                target = self.dfa.transitions[
+                    state
+                ][symbol]
 
                 item = QTableWidgetItem(
                     f"q{target}"
                 )
 
-                if (
-                    target
-                    == self.dfa.accepting_state
-                ):
+                if target == self.dfa.accepting_state:
                     item.setForeground(
                         QColor("#9dd7ff")
                     )
@@ -617,6 +491,8 @@ class MainWindow(QMainWindow):
         self.text_edit.clear()
         self.pattern_edit.clear()
 
+        self.result_label.setText("Result: —")
+
         self.graph_view.clear_graph()
 
         self.table.clear()
@@ -631,8 +507,8 @@ class MainWindow(QMainWindow):
         QMessageBox.information(
             self,
             "About",
-            "Finite Automata Pattern Matcher\n\n"
-            "An educational DFA-based pattern matching "
-            "visualization system.\n\n"
+            "Finite Automata-Based Pattern Matching System\n\n"
+            "An educational system that constructs a DFA from "
+            "a pattern and uses it for pattern matching.\n\n"
             "Built with Python and PySide6.",
         )
