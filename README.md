@@ -35,7 +35,6 @@ The project was developed iteratively through repeated cycles of implementation,
 
 - Python 3.10+
 - PySide6
-- Git
 
 ## Setup
 
