@@ -19,11 +19,13 @@ def find_matches(text: str, dfa: DFA) -> list[int]:
     matches: list[int] = []
     state = 0
     pattern_length = len(dfa.pattern)
+    cycles = 0
 
     for index, character in enumerate(text):
         state = dfa.next_state(state, character)
+        cycles = cycles + 1
 
         if state == dfa.accepting_state:
             matches.append(index - pattern_length + 1)
 
-    return matches
+    return matches, cycles

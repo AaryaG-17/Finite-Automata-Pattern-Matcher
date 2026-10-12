@@ -378,7 +378,7 @@ class MainWindow(QMainWindow):
 
         self._populate_transition_table()
 
-        matches = find_matches(
+        matches, cycles = find_matches(
             text,
             self.dfa,
         )
@@ -390,7 +390,8 @@ class MainWindow(QMainWindow):
             )
 
             self.result_label.setText(
-                f"Result: Pattern found at positions {positions}"
+                f"Result: Pattern found at positions {positions} |"
+                f"Total transitions/cycles required: {cycles}"
             )
         else:
             self.result_label.setText(
